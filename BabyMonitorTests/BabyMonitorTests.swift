@@ -86,6 +86,47 @@ struct BabyMonitorTests {
         #expect(CameraCaptureState.suspended.sessionLifecycleState == .active)
         #expect(CameraCaptureState.stopping.sessionLifecycleState == .stopping)
     }
+
+    @Test func monitoringRequiresBothMediaPermissions() {
+        let allAllowed = MediaPermissionSnapshot(
+            camera: .authorized,
+            microphone: .authorized
+        )
+        let cameraOnly = MediaPermissionSnapshot(
+            camera: .authorized,
+            microphone: .notDetermined
+        )
+        let microphoneOnly = MediaPermissionSnapshot(
+            camera: .notDetermined,
+            microphone: .authorized
+        )
+
+        #expect(allAllowed.allowsMonitoring)
+        #expect(!cameraOnly.allowsMonitoring)
+        #expect(!microphoneOnly.allowsMonitoring)
+    }
+
+    @Test func permissionSnapshotSeparatesRequestAndRecoveryStates() {
+        let requestable = MediaPermissionSnapshot(
+            camera: .authorized,
+            microphone: .notDetermined
+        )
+        let denied = MediaPermissionSnapshot(
+            camera: .denied,
+            microphone: .authorized
+        )
+        let restricted = MediaPermissionSnapshot(
+            camera: .authorized,
+            microphone: .restricted
+        )
+
+        #expect(requestable.permissionsNeedingRequest == [.microphone])
+        #expect(!requestable.hasDeniedPermission)
+        #expect(denied.hasDeniedPermission)
+        #expect(!denied.hasRestrictedPermission)
+        #expect(restricted.hasRestrictedPermission)
+        #expect(!restricted.hasDeniedPermission)
+    }
 }
 
 private final class DefaultsFixture {

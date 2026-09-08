@@ -26,5 +26,6 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
             .environmentObject(AppRoleStore())
             .environmentObject(CameraCaptureController())
+            .environmentObject(MediaPermissionController())
     }
 }

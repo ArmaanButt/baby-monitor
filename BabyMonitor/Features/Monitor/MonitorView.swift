@@ -3,6 +3,7 @@ import SwiftUI
 struct MonitorView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var camera: CameraCaptureController
+    @EnvironmentObject private var permissions: MediaPermissionController
     @EnvironmentObject private var roleStore: AppRoleStore
 
     private let diagnosticColumns = [
@@ -14,10 +15,17 @@ struct MonitorView: View {
         ScrollView {
             VStack(spacing: 18) {
                 header
-                preview
-                status
-                diagnostics
-                controls
+
+                if permissions.snapshot.allowsMonitoring {
+                    preview
+                    status
+                    diagnostics
+                    cameraControls
+                } else {
+                    PermissionOnboardingView()
+                }
+
+                roleControls
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 20)
@@ -25,10 +33,18 @@ struct MonitorView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .onAppear {
+            permissions.refresh()
+        }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
-                camera.handleScenePhase(isActive: true)
+                permissions.refresh()
+                if permissions.snapshot.allowsMonitoring {
+                    camera.handleScenePhase(isActive: true)
+                } else if camera.state.isEngaged {
+                    camera.stop()
+                }
             case .background:
                 camera.handleScenePhase(isActive: false)
             case .inactive:
@@ -39,6 +55,11 @@ struct MonitorView: View {
         }
         .onChange(of: camera.state) { newState in
             roleStore.transition(to: newState.sessionLifecycleState)
+        }
+        .onChange(of: permissions.snapshot) { snapshot in
+            if !snapshot.allowsMonitoring, camera.state.isEngaged {
+                camera.stop()
+            }
         }
     }
 
@@ -125,27 +146,29 @@ struct MonitorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var controls: some View {
-        VStack(spacing: 12) {
-            Button {
-                if camera.state.isEngaged {
-                    camera.stop()
-                } else {
-                    camera.start()
-                }
-            } label: {
-                Label(
-                    camera.state.isEngaged ? "Stop Preview" : "Start 1080p Preview",
-                    systemImage: camera.state.isEngaged ? "stop.fill" : "play.fill"
-                )
-                .font(.headline)
-                .frame(maxWidth: 360)
-                .padding(.vertical, 13)
+    private var cameraControls: some View {
+        Button {
+            if camera.state.isEngaged {
+                camera.stop()
+            } else {
+                camera.start()
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(camera.state == .stopping)
-            .accessibilityIdentifier("toggle-monitor-preview")
+        } label: {
+            Label(
+                camera.state.isEngaged ? "Stop Preview" : "Start 1080p Preview",
+                systemImage: camera.state.isEngaged ? "stop.fill" : "play.fill"
+            )
+            .font(.headline)
+            .frame(maxWidth: 360)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(camera.state == .stopping || !permissions.snapshot.allowsMonitoring)
+        .accessibilityIdentifier("toggle-monitor-preview")
+    }
 
+    private var roleControls: some View {
+        VStack(spacing: 8) {
             Button("Change Role") {
                 roleStore.clearRole()
             }

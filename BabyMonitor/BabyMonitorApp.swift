@@ -11,12 +11,14 @@ import SwiftUI
 struct BabyMonitorApp: App {
     @StateObject private var roleStore = AppRoleStore()
     @StateObject private var camera = CameraCaptureController()
+    @StateObject private var permissions = MediaPermissionController()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(roleStore)
                 .environmentObject(camera)
+                .environmentObject(permissions)
         }
     }
 }

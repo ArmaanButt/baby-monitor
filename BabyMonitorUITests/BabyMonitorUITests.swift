@@ -26,6 +26,7 @@ final class BabyMonitorUITests: XCTestCase {
     func testRoleSelectionPersistsAndCanBeChangedWhileIdle() throws {
         let app = XCUIApplication()
         app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
+        app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "authorized"
         app.launch()
 
         XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
@@ -46,6 +47,26 @@ final class BabyMonitorUITests: XCTestCase {
         app.buttons["select-viewer"].tap()
         XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer role selected")
+        XCTAssertFalse(app.otherElements["permission-onboarding"].exists)
+        XCTAssertFalse(app.buttons["request-media-permissions"].exists)
+        XCTAssertEqual(app.alerts.count, 0)
+    }
+
+    @MainActor
+    func testMonitorExplainsPermissionsBeforeRequestingThem() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
+        app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "undetermined"
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-monitor"].tap()
+
+        XCTAssertTrue(app.otherElements["permission-onboarding"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["permission-camera"].exists)
+        XCTAssertTrue(app.otherElements["permission-microphone"].exists)
+        XCTAssertTrue(app.buttons["request-media-permissions"].exists)
+        XCTAssertFalse(app.buttons["toggle-monitor-preview"].exists)
         XCTAssertEqual(app.alerts.count, 0)
     }
 }
