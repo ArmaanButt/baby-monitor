@@ -23,21 +23,29 @@ final class BabyMonitorUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testRoleSelectionPersistsAndCanBeChangedWhileIdle() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
-    }
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-monitor"].tap()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Monitor")
+        XCTAssertTrue(app.otherElements["monitor-preview"].exists)
+        XCTAssertTrue(app.buttons["toggle-monitor-preview"].exists)
 
-    @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+        app.terminate()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "0"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Monitor")
+
+        app.buttons["change-role"].tap()
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-viewer"].tap()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer role selected")
+        XCTAssertEqual(app.alerts.count, 0)
     }
 }
