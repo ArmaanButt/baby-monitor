@@ -1,6 +1,5 @@
 @preconcurrency import AVFoundation
 import Combine
-import Darwin
 import Foundation
 
 @MainActor
@@ -81,6 +80,11 @@ final class CameraCaptureController: ObservableObject {
         }
     }
 
+    func setDiagnosticsEnabled(_ enabled: Bool) {
+        diagnostics = CameraDiagnostics()
+        engine.setDiagnosticsEnabled(enabled)
+    }
+
     private func handle(_ event: CameraCaptureEngine.Event) {
         switch event {
         case .running:
@@ -92,6 +96,7 @@ final class CameraCaptureController: ObservableObject {
         case .interrupted(let message):
             if wantsPreview {
                 state = .interrupted(message)
+                diagnostics.captureBufferDepth = 0
             }
         case .interruptionEnded:
             if wantsPreview {
@@ -100,10 +105,12 @@ final class CameraCaptureController: ObservableObject {
         case .suspended:
             if wantsPreview {
                 state = .suspended
+                diagnostics.captureBufferDepth = 0
             }
         case .stopped:
             if !wantsPreview {
                 state = .idle
+                diagnostics.captureBufferDepth = 0
             }
         case .failed(let message):
             wantsPreview = false
@@ -145,6 +152,8 @@ private nonisolated final class CameraCaptureEngine:
     private var droppedFrameCount = 0
     private var framesInWindow = 0
     private var windowStartedAt = ProcessInfo.processInfo.systemUptime
+    private var accumulatedProcessingMilliseconds = 0.0
+    private var diagnosticsEnabled = true
 
     init(configuration: CameraCaptureConfiguration) {
         self.configuration = configuration
@@ -320,6 +329,19 @@ private nonisolated final class CameraCaptureEngine:
             self?.droppedFrameCount = 0
             self?.framesInWindow = 0
             self?.windowStartedAt = ProcessInfo.processInfo.systemUptime
+            self?.accumulatedProcessingMilliseconds = 0
+        }
+    }
+
+    func setDiagnosticsEnabled(_ enabled: Bool) {
+        frameQueue.async { [weak self] in
+            guard let self else { return }
+            self.diagnosticsEnabled = enabled
+            self.capturedFrameCount = 0
+            self.droppedFrameCount = 0
+            self.framesInWindow = 0
+            self.accumulatedProcessingMilliseconds = 0
+            self.windowStartedAt = ProcessInfo.processInfo.systemUptime
         }
     }
 
@@ -328,12 +350,18 @@ private nonisolated final class CameraCaptureEngine:
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        guard diagnosticsEnabled else { return }
+        let processingStartedAt = ProcessInfo.processInfo.systemUptime
         capturedFrameCount += 1
         framesInWindow += 1
 
         let now = ProcessInfo.processInfo.systemUptime
         let elapsed = now - windowStartedAt
-        guard elapsed >= 1 else { return }
+        guard elapsed >= 1 else {
+            accumulatedProcessingMilliseconds +=
+                (ProcessInfo.processInfo.systemUptime - processingStartedAt) * 1_000
+            return
+        }
 
         let dimensions: CMVideoDimensions
         if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
@@ -342,14 +370,18 @@ private nonisolated final class CameraCaptureEngine:
             dimensions = CMVideoDimensions(width: 0, height: 0)
         }
 
+        accumulatedProcessingMilliseconds +=
+            (ProcessInfo.processInfo.systemUptime - processingStartedAt) * 1_000
+
         let snapshot = CameraDiagnostics(
             width: Int(dimensions.width),
             height: Int(dimensions.height),
             framesPerSecond: Double(framesInWindow) / elapsed,
             capturedFrameCount: capturedFrameCount,
             droppedFrameCount: droppedFrameCount,
-            residentMemoryMegabytes: Self.residentMemoryMegabytes(),
-            thermalState: Self.thermalStateLabel
+            averageCaptureProcessingMilliseconds:
+                accumulatedProcessingMilliseconds / Double(capturedFrameCount),
+            captureBufferDepth: 1
         )
 
         framesInWindow = 0
@@ -362,6 +394,7 @@ private nonisolated final class CameraCaptureEngine:
         didDrop sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        guard diagnosticsEnabled else { return }
         droppedFrameCount += 1
     }
 
@@ -369,41 +402,6 @@ private nonisolated final class CameraCaptureEngine:
         eventHandler?(event)
     }
 
-    private static var thermalStateLabel: String {
-        switch ProcessInfo.processInfo.thermalState {
-        case .nominal:
-            return "Nominal"
-        case .fair:
-            return "Fair"
-        case .serious:
-            return "Serious"
-        case .critical:
-            return "Critical"
-        @unknown default:
-            return "Unknown"
-        }
-    }
-
-    private static func residentMemoryMegabytes() -> Double {
-        var info = mach_task_basic_info()
-        var count = mach_msg_type_number_t(
-            MemoryLayout<mach_task_basic_info_data_t>.size / MemoryLayout<natural_t>.size
-        )
-
-        let result = withUnsafeMutablePointer(to: &info) { infoPointer in
-            infoPointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(
-                    mach_task_self_,
-                    task_flavor_t(MACH_TASK_BASIC_INFO),
-                    $0,
-                    &count
-                )
-            }
-        }
-
-        guard result == KERN_SUCCESS else { return 0 }
-        return Double(info.resident_size) / 1_048_576
-    }
 }
 
 private extension CameraCaptureConfiguration {

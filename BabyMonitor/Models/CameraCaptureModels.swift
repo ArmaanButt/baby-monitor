@@ -92,8 +92,9 @@ nonisolated struct CameraDiagnostics: Equatable {
     var framesPerSecond = 0.0
     var capturedFrameCount = 0
     var droppedFrameCount = 0
-    var residentMemoryMegabytes = 0.0
-    var thermalState = "Nominal"
+    var averageCaptureProcessingMilliseconds = 0.0
+    var captureBufferDepth = 0
+    let captureBufferLimit = 1
 
     var resolutionLabel: String {
         guard width > 0, height > 0 else { return "Waiting…" }
@@ -104,8 +105,12 @@ nonisolated struct CameraDiagnostics: Equatable {
         String(format: "%.1f FPS", framesPerSecond)
     }
 
-    var memoryLabel: String {
-        guard residentMemoryMegabytes > 0 else { return "Waiting…" }
-        return String(format: "%.0f MB", residentMemoryMegabytes)
+    var captureProcessingLabel: String {
+        guard capturedFrameCount > 0 else { return "Waiting…" }
+        return String(format: "%.2f ms", averageCaptureProcessingMilliseconds)
+    }
+
+    var captureBufferLabel: String {
+        "\(captureBufferDepth) / \(captureBufferLimit) frames"
     }
 }

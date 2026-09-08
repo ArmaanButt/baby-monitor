@@ -74,6 +74,9 @@ private struct ViewerPlaceholderView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+
+                DiagnosticsPanel(role: .viewer)
+                    .frame(maxWidth: 600)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 30)

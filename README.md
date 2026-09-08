@@ -5,7 +5,7 @@ A native, privacy-first baby monitor for two older Apple devices on the same tru
 - An **iPhone 8 running iOS 16.7.16** uses the Monitor role to capture video and one-way room audio, show a local preview, and host the local stream.
 - A **jailbroken iPad Air 2 running iPadOS 15.8.x** uses the Viewer role to discover or pair with the iPhone and play the live video and audio natively.
 
-The repository currently contains the Xcode template UI and test targets; capture, streaming, discovery, pairing, and playback are not implemented yet. The **Baby Monitor MVP** project in Linear is the source of truth for current requirements, milestones, issue status, and acceptance criteria.
+The app currently contains the universal role shell, Monitor permission onboarding, a bounded 1080p/15 camera preview, and an on-device performance diagnostics harness. Encoding, streaming, discovery, pairing, and playback are not implemented yet. The **Baby Monitor MVP** project in Linear is the source of truth for current requirements, milestones, issue status, and acceptance criteria.
 
 ## Product boundaries
 
@@ -121,6 +121,20 @@ Simulators remain useful for UI and deterministic logic, but the following requi
 - Sustained CPU, memory, battery, and thermal behavior on both devices
 - Installation and runtime behavior on both jailbroken devices, with each installer, jailbreak state, reboot behavior, and relevant tweaks recorded in the test results
 
+### Performance checkpoint protocol
+
+The diagnostics panel samples app memory, memory change and peak, thermal state, power state, and elapsed time once per second. Monitor mode also reports effective capture resolution and frame rate, captured and dropped frames, average capture callback work, and the deliberately one-frame capture buffer. Collection can be disabled from either role and that preference is saved; the app never writes video, audio, pairing material, or session credentials to diagnostics.
+
+For the current capture-only baseline:
+
+1. Install this checkpoint's exact IPA on the iPhone 8 and confirm palera1n is active.
+2. Open Monitor mode, expand **Physical test details**, record ambient conditions, leave connected viewers at zero, and note whether the phone is charging.
+3. Start the 1080p preview and leave BabyMonitor visible for 10 minutes without changing its power conditions.
+4. Confirm the effective resolution remains 1920×1080, observed rate remains near 15 FPS, and note dropped frames, memory change/peak, and the worst thermal state.
+5. Tap **Copy Test Snapshot** and paste the result into ARM-209 in Linear.
+
+The Viewer panel already samples device-level memory, thermal, power, and duration. Decode/render timing, video buffer depth, viewer drops, and audio underruns intentionally read **Not active** until those pipelines exist. Repeat the protocol on the iPad during Build 5 playback and attach that second snapshot before ARM-209 is closed.
+
 ## Repository workflow
 
 The repository tracks project metadata, source, assets, tests, `README.md`, and `AGENTS.md`. It ignores per-user Xcode state, build products, derived data, local configuration, and secrets.
@@ -137,4 +151,4 @@ Review the Linear issue and acceptance criteria before starting each change, and
 
 ## Suggested next work
 
-Resolve the measurable operating targets and native transport spike in Linear, then build a conservative foreground camera preview and capture lifecycle on the physical iPhone 8. The first end-to-end prototype should stream to native playback on the physical iPad Air 2 before production transport decisions are finalized.
+Run and record the ARM-209 capture-only baseline on the physical iPhone 8, then implement the bounded H.264 encoder self-test in Build 3. The first end-to-end prototype should stream to native playback on the physical iPad Air 2 before production transport decisions are finalized.

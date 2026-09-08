@@ -127,6 +127,86 @@ struct BabyMonitorTests {
         #expect(restricted.hasRestrictedPermission)
         #expect(!restricted.hasDeniedPermission)
     }
+
+    @Test func memoryTrendTracksBaselineCurrentPeakAndChange() {
+        var trend = MemoryTrend()
+
+        trend.record(megabytes: 0)
+        trend.record(megabytes: 100)
+        trend.record(megabytes: 112.5)
+        trend.record(megabytes: 108)
+
+        #expect(trend.baselineMegabytes == 100)
+        #expect(trend.currentMegabytes == 108)
+        #expect(trend.peakMegabytes == 112.5)
+        #expect(trend.deltaMegabytes == 8)
+        #expect(trend.currentLabel == "108 MB")
+        #expect(trend.trendLabel == "+8.0 MB")
+        #expect(trend.peakLabel == "112 MB")
+    }
+
+    @Test func diagnosticsDurationUsesClockStyleFormatting() {
+        var snapshot = SystemDiagnostics()
+
+        snapshot.elapsedSeconds = 125
+        #expect(snapshot.elapsedLabel == "02:05")
+
+        snapshot.elapsedSeconds = 3_661
+        #expect(snapshot.elapsedLabel == "1:01:01")
+    }
+
+    @Test func monitorReportContainsRepeatableContextAndCaptureMetrics() {
+        var memory = MemoryTrend()
+        memory.record(megabytes: 90)
+        memory.record(megabytes: 94)
+
+        let report = DiagnosticsReport(
+            role: .monitor,
+            system: SystemDiagnostics(
+                deviceIdentifier: "iPhone10,1",
+                operatingSystem: "iOS 16.7.16",
+                powerState: "Charging • 80%",
+                thermalState: "Nominal",
+                elapsedSeconds: 600,
+                memory: memory
+            ),
+            camera: CameraDiagnostics(
+                width: 1_920,
+                height: 1_080,
+                framesPerSecond: 15,
+                capturedFrameCount: 9_000,
+                droppedFrameCount: 2,
+                averageCaptureProcessingMilliseconds: 0.25,
+                captureBufferDepth: 1
+            ),
+            viewer: .unavailable,
+            context: DiagnosticsTestContext(
+                jailbreakActive: true,
+                ambientConditions: "72°F indoors",
+                viewerCount: 0
+            )
+        )
+
+        #expect(report.text.contains("Device: iPhone10,1"))
+        #expect(report.text.contains("Jailbreak active: Yes"))
+        #expect(report.text.contains("Ambient conditions: 72°F indoors"))
+        #expect(report.text.contains("Duration: 10:00"))
+        #expect(report.text.contains("Capture resolution: 1920×1080"))
+        #expect(report.text.contains("Capture buffer: 1 / 1 frames"))
+        #expect(report.text.contains("Encode timing: Not active until Build 3"))
+    }
+
+    @MainActor
+    @Test func diagnosticsCollectionPreferencePersists() {
+        let fixture = DefaultsFixture()
+        let controller = PerformanceDiagnosticsController(defaults: fixture.defaults)
+
+        #expect(controller.isEnabled)
+        controller.setEnabled(false)
+
+        let restored = PerformanceDiagnosticsController(defaults: fixture.defaults)
+        #expect(!restored.isEnabled)
+    }
 }
 
 private final class DefaultsFixture {

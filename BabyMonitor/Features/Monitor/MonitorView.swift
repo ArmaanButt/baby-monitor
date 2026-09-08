@@ -5,11 +5,7 @@ struct MonitorView: View {
     @EnvironmentObject private var camera: CameraCaptureController
     @EnvironmentObject private var permissions: MediaPermissionController
     @EnvironmentObject private var roleStore: AppRoleStore
-
-    private let diagnosticColumns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
-    ]
+    @EnvironmentObject private var performanceDiagnostics: PerformanceDiagnosticsController
 
     var body: some View {
         ScrollView {
@@ -19,13 +15,16 @@ struct MonitorView: View {
                 if permissions.snapshot.allowsMonitoring {
                     preview
                     status
-                    diagnostics
                     cameraControls
                 } else {
                     PermissionOnboardingView()
                 }
 
                 roleControls
+
+                if permissions.snapshot.allowsMonitoring {
+                    DiagnosticsPanel(role: .monitor, camera: camera.diagnostics)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 20)
@@ -35,6 +34,7 @@ struct MonitorView: View {
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .onAppear {
             permissions.refresh()
+            camera.setDiagnosticsEnabled(performanceDiagnostics.isEnabled)
         }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
@@ -60,6 +60,9 @@ struct MonitorView: View {
             if !snapshot.allowsMonitoring, camera.state.isEngaged {
                 camera.stop()
             }
+        }
+        .onChange(of: performanceDiagnostics.isEnabled) { enabled in
+            camera.setDiagnosticsEnabled(enabled)
         }
     }
 
@@ -126,26 +129,6 @@ struct MonitorView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var diagnostics: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Live diagnostics")
-                .font(.headline)
-
-            LazyVGrid(columns: diagnosticColumns, spacing: 10) {
-                diagnosticTile("Resolution", camera.diagnostics.resolutionLabel)
-                diagnosticTile("Observed rate", camera.diagnostics.framesPerSecondLabel)
-                diagnosticTile("Captured", "\(camera.diagnostics.capturedFrameCount) frames")
-                diagnosticTile("Dropped", "\(camera.diagnostics.droppedFrameCount) frames")
-                diagnosticTile("App memory", camera.diagnostics.memoryLabel)
-                diagnosticTile("Thermal", camera.diagnostics.thermalState)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
     private var cameraControls: some View {
         Button {
             if camera.state.isEngaged {
@@ -182,22 +165,6 @@ struct MonitorView: View {
                     .foregroundColor(.secondary)
             }
         }
-    }
-
-    private func diagnosticTile(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Text(value)
-                .font(.subheadline.monospacedDigit().weight(.semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.tertiarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var previewPlaceholderSymbol: String {

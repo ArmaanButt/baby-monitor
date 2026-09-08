@@ -12,6 +12,7 @@ struct BabyMonitorApp: App {
     @StateObject private var roleStore = AppRoleStore()
     @StateObject private var camera = CameraCaptureController()
     @StateObject private var permissions = MediaPermissionController()
+    @StateObject private var performanceDiagnostics = PerformanceDiagnosticsController()
 
     var body: some Scene {
         WindowGroup {
@@ -19,6 +20,7 @@ struct BabyMonitorApp: App {
                 .environmentObject(roleStore)
                 .environmentObject(camera)
                 .environmentObject(permissions)
+                .environmentObject(performanceDiagnostics)
         }
     }
 }

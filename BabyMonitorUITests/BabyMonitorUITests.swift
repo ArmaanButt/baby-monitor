@@ -33,8 +33,9 @@ final class BabyMonitorUITests: XCTestCase {
         app.buttons["select-monitor"].tap()
         XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Monitor")
-        XCTAssertTrue(app.otherElements["monitor-preview"].exists)
-        XCTAssertTrue(app.buttons["toggle-monitor-preview"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["monitor-preview"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["toggle-monitor-preview"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["performance-diagnostics"].waitForExistence(timeout: 5))
 
         app.terminate()
         app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "0"
@@ -47,7 +48,8 @@ final class BabyMonitorUITests: XCTestCase {
         app.buttons["select-viewer"].tap()
         XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer role selected")
-        XCTAssertFalse(app.otherElements["permission-onboarding"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["performance-diagnostics"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["permission-onboarding"].exists)
         XCTAssertFalse(app.buttons["request-media-permissions"].exists)
         XCTAssertEqual(app.alerts.count, 0)
     }
@@ -62,10 +64,14 @@ final class BabyMonitorUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
         app.buttons["select-monitor"].tap()
 
-        XCTAssertTrue(app.otherElements["permission-onboarding"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.otherElements["permission-camera"].exists)
-        XCTAssertTrue(app.otherElements["permission-microphone"].exists)
-        XCTAssertTrue(app.buttons["request-media-permissions"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["permission-onboarding"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Camera"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Microphone"].waitForExistence(timeout: 5))
+        let continueButton = app.buttons["Continue"]
+        if !continueButton.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["toggle-monitor-preview"].exists)
         XCTAssertEqual(app.alerts.count, 0)
     }
