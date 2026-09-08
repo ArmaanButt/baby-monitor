@@ -23,21 +23,50 @@ final class BabyMonitorUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testRoleSelectionPersistsAndCanBeChangedWhileIdle() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
+        app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "authorized"
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-monitor"].tap()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Monitor")
+        XCTAssertTrue(app.otherElements["monitor-preview"].exists)
+        XCTAssertTrue(app.buttons["toggle-monitor-preview"].exists)
+
+        app.terminate()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "0"
+        app.launch()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Monitor")
+
+        app.buttons["change-role"].tap()
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-viewer"].tap()
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer role selected")
+        XCTAssertFalse(app.otherElements["permission-onboarding"].exists)
+        XCTAssertFalse(app.buttons["request-media-permissions"].exists)
+        XCTAssertEqual(app.alerts.count, 0)
     }
 
     @MainActor
-    func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+    func testMonitorExplainsPermissionsBeforeRequestingThem() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
+        app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "undetermined"
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
+        app.buttons["select-monitor"].tap()
+
+        XCTAssertTrue(app.otherElements["permission-onboarding"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.otherElements["permission-camera"].exists)
+        XCTAssertTrue(app.otherElements["permission-microphone"].exists)
+        XCTAssertTrue(app.buttons["request-media-permissions"].exists)
+        XCTAssertFalse(app.buttons["toggle-monitor-preview"].exists)
+        XCTAssertEqual(app.alerts.count, 0)
     }
 }
