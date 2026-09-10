@@ -1,15 +1,14 @@
 import Foundation
 
 nonisolated struct CameraCaptureConfiguration: Equatable {
-    let width: Int32
-    let height: Int32
-    let framesPerSecond: Int32
+    let profile: StreamVideoProfile
 
-    static let highQuality = CameraCaptureConfiguration(
-        width: 1_920,
-        height: 1_080,
-        framesPerSecond: 15
-    )
+    static let highQuality = CameraCaptureConfiguration(profile: .highQuality1080p)
+    static let fallback = CameraCaptureConfiguration(profile: .fallback720p)
+
+    var width: Int32 { profile.width }
+    var height: Int32 { profile.height }
+    var framesPerSecond: Int32 { profile.framesPerSecond }
 
     var resolutionLabel: String {
         "\(width)×\(height)"
@@ -49,6 +48,15 @@ nonisolated enum CameraCaptureState: Equatable {
         }
     }
 
+    var isFailure: Bool {
+        switch self {
+        case .denied, .failed:
+            return true
+        default:
+            return false
+        }
+    }
+
     var statusTitle: String {
         switch self {
         case .idle:
@@ -56,7 +64,7 @@ nonisolated enum CameraCaptureState: Equatable {
         case .requestingPermission:
             return "Waiting for camera permission"
         case .configuring:
-            return "Preparing 1080p camera"
+            return "Preparing camera"
         case .running:
             return "Preview live"
         case .interrupted:
@@ -92,8 +100,9 @@ nonisolated struct CameraDiagnostics: Equatable {
     var framesPerSecond = 0.0
     var capturedFrameCount = 0
     var droppedFrameCount = 0
-    var residentMemoryMegabytes = 0.0
-    var thermalState = "Nominal"
+    var averageCaptureProcessingMilliseconds = 0.0
+    var captureBufferDepth = 0
+    let captureBufferLimit = 1
 
     var resolutionLabel: String {
         guard width > 0, height > 0 else { return "Waiting…" }
@@ -104,8 +113,12 @@ nonisolated struct CameraDiagnostics: Equatable {
         String(format: "%.1f FPS", framesPerSecond)
     }
 
-    var memoryLabel: String {
-        guard residentMemoryMegabytes > 0 else { return "Waiting…" }
-        return String(format: "%.0f MB", residentMemoryMegabytes)
+    var captureProcessingLabel: String {
+        guard capturedFrameCount > 0 else { return "Waiting…" }
+        return String(format: "%.2f ms", averageCaptureProcessingMilliseconds)
+    }
+
+    var captureBufferLabel: String {
+        "\(captureBufferDepth) / \(captureBufferLimit) frames"
     }
 }

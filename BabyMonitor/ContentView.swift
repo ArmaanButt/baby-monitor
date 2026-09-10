@@ -18,6 +18,9 @@ struct ContentView: View {
                 RoleSelectionView()
             }
         }
+#if targetEnvironment(macCatalyst)
+        .frame(minWidth: 600, minHeight: 500)
+#endif
     }
 }
 
@@ -26,6 +29,12 @@ struct ContentView_Previews: PreviewProvider {
         ContentView()
             .environmentObject(AppRoleStore())
             .environmentObject(CameraCaptureController())
+            .environmentObject(H264VideoEncoderController())
+            .environmentObject(H264VideoPlaybackController())
+            .environmentObject(RoomAudioCaptureController())
+            .environmentObject(RoomAudioPlaybackController())
+            .environmentObject(LocalConnectionController())
             .environmentObject(MediaPermissionController())
+            .environmentObject(PerformanceDiagnosticsController())
     }
 }
