@@ -4,6 +4,14 @@ nonisolated enum DeviceRole: String, CaseIterable, Codable, Identifiable {
     case monitor
     case viewer
 
+    static var defaultForPlatform: DeviceRole? {
+#if targetEnvironment(macCatalyst)
+        return .viewer
+#else
+        return nil
+#endif
+    }
+
     var id: String { rawValue }
 
     var title: String {

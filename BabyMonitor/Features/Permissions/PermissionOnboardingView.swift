@@ -10,7 +10,7 @@ struct PermissionOnboardingView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Before monitoring starts")
                     .font(.title2.weight(.bold))
-                Text("Baby Monitor needs access to this iPhone’s camera and microphone. Video and audio stay on your local network and are never uploaded to a cloud service.")
+                Text("Baby Monitor needs access to this device’s camera and microphone. Video and audio stay on your local network and are never uploaded to a cloud service.")
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -22,7 +22,7 @@ struct PermissionOnboardingView: View {
 
             permissionRow(
                 .microphone,
-                explanation: "Provides room audio. This build verifies consent only; audio is not captured or sent yet."
+                explanation: "Provides the live room audio heard by your paired Viewer."
             )
 
             actionArea
@@ -74,7 +74,7 @@ struct PermissionOnboardingView: View {
     private var actionArea: some View {
         if permissions.snapshot.hasDeniedPermission {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Access was denied. Open Settings, choose Baby Monitor, and allow both Camera and Microphone.")
+                Text(permissionRecoveryMessage)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
@@ -115,10 +115,18 @@ struct PermissionOnboardingView: View {
             .disabled(permissions.isRequesting)
             .accessibilityIdentifier("request-media-permissions")
 
-            Text("iOS will ask for each permission separately. You can change either choice later in Settings.")
+            Text("Your system will ask for each permission separately. You can change either choice later in Settings.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
         }
+    }
+
+    private var permissionRecoveryMessage: String {
+#if targetEnvironment(macCatalyst)
+        return "Open System Settings (System Preferences on older macOS), then Privacy & Security. Allow Baby Monitor under Camera and Microphone."
+#else
+        return "Access was denied. Open Settings, choose Baby Monitor, and allow both Camera and Microphone."
+#endif
     }
 
     private var requestButtonTitle: String {

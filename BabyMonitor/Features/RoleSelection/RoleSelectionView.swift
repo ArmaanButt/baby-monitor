@@ -20,7 +20,7 @@ struct RoleSelectionView: View {
                     }
                 }
 
-                checkpointNotice
+                pairingNotice
             }
             .frame(maxWidth: 880)
             .padding(.horizontal, 20)
@@ -49,11 +49,11 @@ struct RoleSelectionView: View {
         }
     }
 
-    private var checkpointNotice: some View {
+    private var pairingNotice: some View {
         Label {
-            Text("Build 1 sets up device roles only. Camera, microphone, and local streaming arrive in later test builds.")
+            Text("Choose Monitor for the device in the room, and Viewer to watch from your iPad or Mac. Pairing keeps video and audio private on your local network.")
         } icon: {
-            Image(systemName: "hammer.fill")
+            Image(systemName: "lock.shield")
         }
         .font(.footnote)
         .foregroundColor(.secondary)
@@ -61,7 +61,7 @@ struct RoleSelectionView: View {
         .frame(maxWidth: 620, alignment: .leading)
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityIdentifier("build-one-notice")
+        .accessibilityIdentifier("private-pairing-notice")
     }
 }
 

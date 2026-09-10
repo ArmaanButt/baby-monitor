@@ -63,9 +63,14 @@ nonisolated struct SystemDiagnostics: Equatable {
 }
 
 nonisolated struct ViewerDiagnostics: Equatable {
+    static let videoBufferLimit = 3
+    static let audioBufferLimit = 8
+
     var averageDecodeRenderMilliseconds: Double?
     var videoBufferDepth: Int?
     var droppedFrameCount: Int?
+    var audioBufferDepth: Int?
+    var droppedAudioPacketCount: Int?
     var audioUnderrunCount: Int?
 
     static let unavailable = ViewerDiagnostics()
@@ -81,6 +86,8 @@ nonisolated struct DiagnosticsReport: Equatable {
     let role: DiagnosticsRole
     let system: SystemDiagnostics
     let camera: CameraDiagnostics
+    let encoder: VideoEncoderDiagnostics
+    let audio: RoomAudioCaptureDiagnostics
     let viewer: ViewerDiagnostics
     let context: DiagnosticsTestContext
 
@@ -110,13 +117,23 @@ nonisolated struct DiagnosticsReport: Equatable {
                 "Dropped capture frames: \(camera.droppedFrameCount)",
                 "Capture processing: \(camera.captureProcessingLabel)",
                 "Capture buffer: \(camera.captureBufferLabel)",
-                "Encode timing: Not active until Build 3"
+                "Encoder: \(encoder.accelerationLabel)",
+                "Encoded frames: \(encoder.encodedFrameCount)",
+                "Dropped encode frames: \(encoder.droppedFrameCount)",
+                "Encode timing: \(encoder.averageEncodeLabel)",
+                "Encoded bitrate: \(encoder.bitrateLabel)",
+                "Encode buffer: \(encoder.bufferLabel)",
+                "Audio packets: \(audio.capturedPacketCount)",
+                "Dropped audio packets: \(audio.droppedPacketCount)",
+                "Audio buffer: \(audio.bufferLabel)"
             ])
         case .viewer:
             lines.append(contentsOf: [
                 "Decode/render timing: \(Self.optionalMilliseconds(viewer.averageDecodeRenderMilliseconds))",
-                "Video buffer depth: \(Self.optionalCount(viewer.videoBufferDepth, unit: "frames"))",
+                "Video buffer depth: \(Self.optionalBoundedCount(viewer.videoBufferDepth, limit: ViewerDiagnostics.videoBufferLimit, unit: "frames"))",
                 "Dropped viewer frames: \(Self.optionalCount(viewer.droppedFrameCount, unit: "frames"))",
+                "Audio buffer depth: \(Self.optionalBoundedCount(viewer.audioBufferDepth, limit: ViewerDiagnostics.audioBufferLimit, unit: "packets"))",
+                "Dropped audio packets: \(Self.optionalCount(viewer.droppedAudioPacketCount, unit: "packets"))",
                 "Audio underruns: \(Self.optionalCount(viewer.audioUnderrunCount, unit: "events"))"
             ])
         }
@@ -132,5 +149,14 @@ nonisolated struct DiagnosticsReport: Equatable {
     private static func optionalCount(_ value: Int?, unit: String) -> String {
         guard let value else { return "Not active until streaming" }
         return "\(value) \(unit)"
+    }
+
+    private static func optionalBoundedCount(
+        _ value: Int?,
+        limit: Int,
+        unit: String
+    ) -> String {
+        guard let value else { return "Not active until streaming" }
+        return "\(value) / \(limit) \(unit)"
     }
 }

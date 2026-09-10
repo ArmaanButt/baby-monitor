@@ -12,7 +12,8 @@ final class AppRoleStore: ObservableObject {
 
     init(
         defaults: UserDefaults = .standard,
-        initialSessionState: SessionLifecycleState = .idle
+        initialSessionState: SessionLifecycleState = .idle,
+        defaultRole: DeviceRole? = nil
     ) {
         self.defaults = defaults
         sessionState = initialSessionState
@@ -24,9 +25,9 @@ final class AppRoleStore: ObservableObject {
 #endif
 
         if let storedValue = defaults.string(forKey: Self.selectedRoleKey) {
-            selectedRole = DeviceRole(rawValue: storedValue)
+            selectedRole = DeviceRole(rawValue: storedValue) ?? defaultRole
         } else {
-            selectedRole = nil
+            selectedRole = defaultRole
         }
     }
 

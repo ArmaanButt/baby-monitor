@@ -6,6 +6,8 @@ struct DiagnosticsPanel: View {
 
     let role: DiagnosticsRole
     var camera = CameraDiagnostics()
+    var encoder = VideoEncoderDiagnostics()
+    var audio = RoomAudioCaptureDiagnostics()
     var viewer = ViewerDiagnostics.unavailable
 
     @State private var copiedReport = false
@@ -99,19 +101,43 @@ struct DiagnosticsPanel: View {
                 tile("Dropped", "\(camera.droppedFrameCount) frames")
                 tile("Capture work", camera.captureProcessingLabel)
                 tile("Capture buffer", camera.captureBufferLabel)
-                tile("Encode timing", "Not active")
+                tile("Encoder", encoder.accelerationLabel)
+                tile("Encoded", "\(encoder.encodedFrameCount) frames")
+                tile("Encode dropped", "\(encoder.droppedFrameCount) frames")
+                tile("Encode timing", encoder.averageEncodeLabel)
+                tile("Bitrate", encoder.bitrateLabel)
+                tile("Encode buffer", encoder.bufferLabel)
+                tile("Audio packets", "\(audio.capturedPacketCount)")
+                tile("Audio dropped", "\(audio.droppedPacketCount)")
+                tile("Audio buffer", audio.bufferLabel)
             }
         case .viewer:
             VStack(alignment: .leading, spacing: 10) {
-                Text("Playback measurements activate when live video and audio are implemented.")
+                Text("Playback measurements activate after an authenticated encrypted stream starts.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 LazyVGrid(columns: columns, spacing: 10) {
                     tile("Decode/render", optionalMilliseconds(viewer.averageDecodeRenderMilliseconds))
-                    tile("Video buffer", optionalCount(viewer.videoBufferDepth, unit: "frames"))
+                    tile(
+                        "Video buffer",
+                        optionalBoundedCount(
+                            viewer.videoBufferDepth,
+                            limit: ViewerDiagnostics.videoBufferLimit,
+                            unit: "frames"
+                        )
+                    )
                     tile("Dropped", optionalCount(viewer.droppedFrameCount, unit: "frames"))
+                    tile(
+                        "Audio buffer",
+                        optionalBoundedCount(
+                            viewer.audioBufferDepth,
+                            limit: ViewerDiagnostics.audioBufferLimit,
+                            unit: "packets"
+                        )
+                    )
+                    tile("Audio dropped", optionalCount(viewer.droppedAudioPacketCount, unit: "packets"))
                     tile("Audio underruns", optionalCount(viewer.audioUnderrunCount, unit: "events"))
                 }
             }
@@ -168,7 +194,13 @@ struct DiagnosticsPanel: View {
     }
 
     private var report: DiagnosticsReport {
-        diagnostics.makeReport(role: role, camera: camera, viewer: viewer)
+        diagnostics.makeReport(
+            role: role,
+            camera: camera,
+            encoder: encoder,
+            audio: audio,
+            viewer: viewer
+        )
     }
 
     private func tile(_ title: String, _ value: String) -> some View {
@@ -206,5 +238,14 @@ struct DiagnosticsPanel: View {
     private func optionalCount(_ value: Int?, unit: String) -> String {
         guard let value else { return "Not active" }
         return "\(value) \(unit)"
+    }
+
+    private func optionalBoundedCount(
+        _ value: Int?,
+        limit: Int,
+        unit: String
+    ) -> String {
+        guard let value else { return "Not active" }
+        return "\(value) / \(limit) \(unit)"
     }
 }

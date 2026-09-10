@@ -29,6 +29,10 @@ final class BabyMonitorUITests: XCTestCase {
         app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "authorized"
         app.launch()
 
+#if targetEnvironment(macCatalyst)
+        XCTAssertTrue(app.buttons["change-role"].waitForExistence(timeout: 5))
+        app.buttons["change-role"].tap()
+#endif
         XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
         app.buttons["select-monitor"].tap()
         XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
@@ -47,8 +51,9 @@ final class BabyMonitorUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
         app.buttons["select-viewer"].tap()
         XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer role selected")
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer")
         XCTAssertTrue(app.descendants(matching: .any)["performance-diagnostics"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["start-monitor-discovery"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.descendants(matching: .any)["permission-onboarding"].exists)
         XCTAssertFalse(app.buttons["request-media-permissions"].exists)
         XCTAssertEqual(app.alerts.count, 0)
@@ -61,6 +66,10 @@ final class BabyMonitorUITests: XCTestCase {
         app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "undetermined"
         app.launch()
 
+#if targetEnvironment(macCatalyst)
+        XCTAssertTrue(app.buttons["change-role"].waitForExistence(timeout: 5))
+        app.buttons["change-role"].tap()
+#endif
         XCTAssertTrue(app.staticTexts["role-selection-title"].waitForExistence(timeout: 5))
         app.buttons["select-monitor"].tap()
 
@@ -75,4 +84,21 @@ final class BabyMonitorUITests: XCTestCase {
         XCTAssertFalse(app.buttons["toggle-monitor-preview"].exists)
         XCTAssertEqual(app.alerts.count, 0)
     }
+
+#if targetEnvironment(macCatalyst)
+    @MainActor
+    func testMacOpensViewerWithoutCapturePermissions() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["BABYMONITOR_UI_TEST_RESET_ROLE"] = "1"
+        app.launchEnvironment["BABYMONITOR_UI_TEST_MEDIA_PERMISSIONS"] = "denied"
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["selected-role-title"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["selected-role-title"].label, "Viewer")
+        XCTAssertTrue(app.buttons["start-monitor-discovery"].exists)
+        XCTAssertFalse(app.buttons["request-media-permissions"].exists)
+        XCTAssertFalse(app.buttons["toggle-monitor-preview"].exists)
+        XCTAssertEqual(app.alerts.count, 0)
+    }
+#endif
 }

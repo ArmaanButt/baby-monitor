@@ -55,12 +55,16 @@ final class PerformanceDiagnosticsController: ObservableObject {
     func makeReport(
         role: DiagnosticsRole,
         camera: CameraDiagnostics = CameraDiagnostics(),
+        encoder: VideoEncoderDiagnostics = VideoEncoderDiagnostics(),
+        audio: RoomAudioCaptureDiagnostics = RoomAudioCaptureDiagnostics(),
         viewer: ViewerDiagnostics = .unavailable
     ) -> DiagnosticsReport {
         DiagnosticsReport(
             role: role,
             system: system,
             camera: camera,
+            encoder: encoder,
+            audio: audio,
             viewer: viewer,
             context: testContext
         )

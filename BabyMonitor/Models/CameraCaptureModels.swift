@@ -1,15 +1,14 @@
 import Foundation
 
 nonisolated struct CameraCaptureConfiguration: Equatable {
-    let width: Int32
-    let height: Int32
-    let framesPerSecond: Int32
+    let profile: StreamVideoProfile
 
-    static let highQuality = CameraCaptureConfiguration(
-        width: 1_920,
-        height: 1_080,
-        framesPerSecond: 15
-    )
+    static let highQuality = CameraCaptureConfiguration(profile: .highQuality1080p)
+    static let fallback = CameraCaptureConfiguration(profile: .fallback720p)
+
+    var width: Int32 { profile.width }
+    var height: Int32 { profile.height }
+    var framesPerSecond: Int32 { profile.framesPerSecond }
 
     var resolutionLabel: String {
         "\(width)×\(height)"
@@ -49,6 +48,15 @@ nonisolated enum CameraCaptureState: Equatable {
         }
     }
 
+    var isFailure: Bool {
+        switch self {
+        case .denied, .failed:
+            return true
+        default:
+            return false
+        }
+    }
+
     var statusTitle: String {
         switch self {
         case .idle:
@@ -56,7 +64,7 @@ nonisolated enum CameraCaptureState: Equatable {
         case .requestingPermission:
             return "Waiting for camera permission"
         case .configuring:
-            return "Preparing 1080p camera"
+            return "Preparing camera"
         case .running:
             return "Preview live"
         case .interrupted:

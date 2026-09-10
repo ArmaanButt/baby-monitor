@@ -5,7 +5,7 @@ import Foundation
 @MainActor
 final class CameraCaptureController: ObservableObject {
     let session: AVCaptureSession
-    let configuration: CameraCaptureConfiguration
+    @Published private(set) var configuration: CameraCaptureConfiguration
 
     @Published private(set) var state: CameraCaptureState = .idle
     @Published private(set) var diagnostics = CameraDiagnostics()
@@ -27,15 +27,16 @@ final class CameraCaptureController: ObservableObject {
         }
     }
 
-    func start() {
+    func start(profile: StreamVideoProfile = .highQuality1080p) {
         guard !wantsPreview else { return }
 
+        configuration = CameraCaptureConfiguration(profile: profile)
         wantsPreview = true
 
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
             state = .configuring
-            engine.start()
+            engine.start(configuration: configuration)
         case .notDetermined:
             state = .requestingPermission
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
@@ -44,7 +45,7 @@ final class CameraCaptureController: ObservableObject {
 
                     if granted {
                         self.state = .configuring
-                        self.engine.start()
+                        self.engine.start(configuration: self.configuration)
                     } else {
                         self.wantsPreview = false
                         self.state = .denied
@@ -73,7 +74,7 @@ final class CameraCaptureController: ObservableObject {
 
         if isActive {
             state = .configuring
-            engine.start()
+            engine.start(configuration: configuration)
         } else {
             state = .suspended
             engine.stop(finalEvent: .suspended)
@@ -83,6 +84,12 @@ final class CameraCaptureController: ObservableObject {
     func setDiagnosticsEnabled(_ enabled: Bool) {
         diagnostics = CameraDiagnostics()
         engine.setDiagnosticsEnabled(enabled)
+    }
+
+    func setVideoFrameHandler(
+        _ handler: (@Sendable (CMSampleBuffer) -> Void)?
+    ) {
+        engine.setVideoFrameHandler(handler)
     }
 
     private func handle(_ event: CameraCaptureEngine.Event) {
@@ -139,7 +146,7 @@ private nonisolated final class CameraCaptureEngine:
     let session = AVCaptureSession()
     var eventHandler: ((Event) -> Void)?
 
-    private let configuration: CameraCaptureConfiguration
+    private var configuration: CameraCaptureConfiguration
     private let sessionQueue = DispatchQueue(label: "com.armaanbutt.BabyMonitor.camera.session")
     private let frameQueue = DispatchQueue(
         label: "com.armaanbutt.BabyMonitor.camera.frames",
@@ -154,6 +161,7 @@ private nonisolated final class CameraCaptureEngine:
     private var windowStartedAt = ProcessInfo.processInfo.systemUptime
     private var accumulatedProcessingMilliseconds = 0.0
     private var diagnosticsEnabled = true
+    private var videoFrameHandler: (@Sendable (CMSampleBuffer) -> Void)?
 
     init(configuration: CameraCaptureConfiguration) {
         self.configuration = configuration
@@ -165,12 +173,13 @@ private nonisolated final class CameraCaptureEngine:
         observerTokens.forEach(NotificationCenter.default.removeObserver)
     }
 
-    func start() {
+    func start(configuration: CameraCaptureConfiguration) {
         sessionQueue.async { [weak self] in
             guard let self else { return }
 
             do {
-                if !self.isConfigured {
+                if !self.isConfigured || self.configuration != configuration {
+                    self.configuration = configuration
                     try self.configureSession()
                     self.isConfigured = true
                 }
@@ -200,22 +209,35 @@ private nonisolated final class CameraCaptureEngine:
         }
     }
 
+    func setVideoFrameHandler(
+        _ handler: (@Sendable (CMSampleBuffer) -> Void)?
+    ) {
+        frameQueue.async { [weak self] in
+            self?.videoFrameHandler = handler
+        }
+    }
+
     private func configureSession() throws {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
         guard session.canSetSessionPreset(configuration.sessionPreset) else {
-            throw CameraCaptureError.unsupported1080p
+            throw CameraCaptureError.unsupportedPreset(
+                configuration.resolutionLabel
+            )
         }
         session.sessionPreset = configuration.sessionPreset
 
-        guard
-            let camera = AVCaptureDevice.default(
+#if targetEnvironment(macCatalyst)
+        let selectedCamera = AVCaptureDevice.default(for: .video)
+#else
+        let selectedCamera = AVCaptureDevice.default(
                 .builtInWideAngleCamera,
                 for: .video,
                 position: .back
             )
-        else {
+#endif
+        guard let camera = selectedCamera else {
             throw CameraCaptureError.noBackCamera
         }
 
@@ -350,6 +372,7 @@ private nonisolated final class CameraCaptureEngine:
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        videoFrameHandler?(sampleBuffer)
         guard diagnosticsEnabled else { return }
         let processingStartedAt = ProcessInfo.processInfo.systemUptime
         capturedFrameCount += 1
@@ -417,7 +440,7 @@ private extension CameraCaptureConfiguration {
 
 private enum CameraCaptureError: LocalizedError {
     case noBackCamera
-    case unsupported1080p
+    case unsupportedPreset(String)
     case unsupportedFrameRate(Int32)
     case cannotAddInput
     case cannotAddOutput
@@ -426,8 +449,8 @@ private enum CameraCaptureError: LocalizedError {
         switch self {
         case .noBackCamera:
             return "No back camera is available on this device."
-        case .unsupported1080p:
-            return "This camera does not support the required 1920×1080 preview."
+        case .unsupportedPreset(let resolution):
+            return "This camera does not support the selected \(resolution) preview."
         case .unsupportedFrameRate(let framesPerSecond):
             return "This camera does not support \(framesPerSecond) FPS in the selected format."
         case .cannotAddInput:

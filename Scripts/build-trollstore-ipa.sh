@@ -64,6 +64,26 @@ for privacy_key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocal
   fi
 done
 
+BONJOUR_SERVICE="$($PLIST_BUDDY -c 'Print :NSBonjourServices:0' "$INFO_PLIST" 2>/dev/null || true)"
+if [[ "$BONJOUR_SERVICE" != "_babymonitor._tcp" ]]; then
+  echo "Built Info.plist does not declare the BabyMonitor Bonjour service" >&2
+  exit 1
+fi
+
+IPHONE_FAMILY="$($PLIST_BUDDY -c 'Print :UIDeviceFamily:0' "$INFO_PLIST" 2>/dev/null || true)"
+IPAD_FAMILY="$($PLIST_BUDDY -c 'Print :UIDeviceFamily:1' "$INFO_PLIST" 2>/dev/null || true)"
+if [[ "$IPHONE_FAMILY" != "1" || "$IPAD_FAMILY" != "2" ]]; then
+  echo "Built app must target both iPhone and iPad; found UIDeviceFamily $IPHONE_FAMILY,$IPAD_FAMILY" >&2
+  exit 1
+fi
+
+if [[ ! -f "$APP_PATH/Assets.car" ]] ||
+   [[ ! -f "$APP_PATH/AppIcon60x60@2x.png" ]] ||
+   [[ ! -f "$APP_PATH/AppIcon76x76@2x~ipad.png" ]]; then
+  echo "Built app is missing compiled iPhone or iPad icon assets" >&2
+  exit 1
+fi
+
 ARCHITECTURES="$($LIPO -archs "$EXECUTABLE_PATH")"
 if [[ "$ARCHITECTURES" != "arm64" ]]; then
   echo "Expected exactly arm64, found: $ARCHITECTURES" >&2
@@ -187,6 +207,24 @@ for privacy_key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocal
   fi
 done
 
+if [[ "$($PLIST_BUDDY -c 'Print :NSBonjourServices:0' "$EXTRACTED_APP/Info.plist" 2>/dev/null || true)" != "_babymonitor._tcp" ]]; then
+  echo "Packaged Info.plist is missing the BabyMonitor Bonjour service" >&2
+  exit 1
+fi
+
+if [[ "$($PLIST_BUDDY -c 'Print :UIDeviceFamily:0' "$EXTRACTED_APP/Info.plist" 2>/dev/null || true)" != "1" ]] ||
+   [[ "$($PLIST_BUDDY -c 'Print :UIDeviceFamily:1' "$EXTRACTED_APP/Info.plist" 2>/dev/null || true)" != "2" ]]; then
+  echo "Packaged app does not target both iPhone and iPad" >&2
+  exit 1
+fi
+
+if [[ ! -f "$EXTRACTED_APP/Assets.car" ]] ||
+   [[ ! -f "$EXTRACTED_APP/AppIcon60x60@2x.png" ]] ||
+   [[ ! -f "$EXTRACTED_APP/AppIcon76x76@2x~ipad.png" ]]; then
+  echo "Packaged app is missing compiled iPhone or iPad icon assets" >&2
+  exit 1
+fi
+
 IPA_SHA256="$(shasum -a 256 "$IPA_PATH" | awk '{print $1}')"
 IPA_SIZE="$(stat -f '%z' "$IPA_PATH")"
 
@@ -199,6 +237,9 @@ IPA_SIZE="$(stat -f '%z' "$IPA_PATH")"
   echo "Executable: $EXECUTABLE_NAME"
   echo "Architectures: $EXTRACTED_ARCHITECTURES"
   echo "MinimumOSVersion: $MINIMUM_OS"
+  echo "Supported device families: iPhone and iPad"
+  echo "Bonjour service: _babymonitor._tcp"
+  echo "Compiled app icons: iPhone and iPad present"
   echo "Apple provisioning profile: absent"
   echo "Privacy descriptions: camera, microphone, and local network present"
   echo "Entitlements: $ENTITLEMENTS_STATUS"
