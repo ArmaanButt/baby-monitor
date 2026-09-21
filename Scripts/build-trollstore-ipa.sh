@@ -9,6 +9,8 @@ SCHEME="BabyMonitor"
 CONFIGURATION="${CONFIGURATION:-Release}"
 BUILD_ROOT="${BUILD_ROOT:-$PROJECT_ROOT/.build/trollstore}"
 DERIVED_DATA="$BUILD_ROOT/DerivedData"
+SOURCE_PACKAGES_PATH="${SOURCE_PACKAGES_PATH:-$PROJECT_ROOT/.build/SourcePackages}"
+STAGING_IPA="$BUILD_ROOT/BabyMonitor.ipa"
 PACKAGE_ROOT="$BUILD_ROOT/Package"
 EXTRACT_ROOT="$BUILD_ROOT/ExtractedIPA"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/dist}"
@@ -30,6 +32,8 @@ xcodebuild \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
   -derivedDataPath "$DERIVED_DATA" \
+  -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+  -disableAutomaticPackageResolution \
   ARCHS=arm64 \
   ONLY_ACTIVE_ARCH=YES \
   CODE_SIGNING_ALLOWED=NO \
@@ -91,7 +95,7 @@ if [[ "$ARCHITECTURES" != "arm64" ]]; then
 fi
 
 MINIMUM_OS="$($PLIST_BUDDY -c 'Print :MinimumOSVersion' "$INFO_PLIST")"
-if ! awk -v actual="$MINIMUM_OS" -v maximum="16.7.16" 'BEGIN {
+if ! awk -v actual="$MINIMUM_OS" -v maximum="15.0" 'BEGIN {
   actual_count = split(actual, actual_parts, ".")
   maximum_count = split(maximum, maximum_parts, ".")
   count = actual_count > maximum_count ? actual_count : maximum_count
@@ -103,7 +107,7 @@ if ! awk -v actual="$MINIMUM_OS" -v maximum="16.7.16" 'BEGIN {
   }
   exit 0
 }'; then
-  echo "MinimumOSVersion $MINIMUM_OS is newer than iOS 16.7.16" >&2
+  echo "MinimumOSVersion $MINIMUM_OS is newer than iOS/iPadOS 15.0" >&2
   exit 1
 fi
 
@@ -121,6 +125,8 @@ ENTITLEMENTS_SETTING="$(xcodebuild \
   ARCHS=arm64 \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
+  -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_PATH" \
+  -disableAutomaticPackageResolution \
   -showBuildSettings | awk -F ' = ' '/^[[:space:]]*CODE_SIGN_ENTITLEMENTS = / { print $2; exit }')"
 
 ENTITLEMENTS_STATUS="No CODE_SIGN_ENTITLEMENTS file is configured."
@@ -173,14 +179,14 @@ else
 fi
 
 /usr/bin/ditto "$APP_PATH" "$PACKAGE_ROOT/Payload/BabyMonitor.app"
-rm -f -- "$IPA_PATH"
+rm -f -- "$STAGING_IPA"
 (
   cd "$PACKAGE_ROOT"
-  /usr/bin/ditto -c -k --norsrc --keepParent Payload "$IPA_PATH"
+  /usr/bin/ditto -c -k --norsrc --keepParent Payload "$STAGING_IPA"
 )
 
-/usr/bin/unzip -tq "$IPA_PATH" >/dev/null
-/usr/bin/ditto -x -k "$IPA_PATH" "$EXTRACT_ROOT"
+/usr/bin/unzip -tq "$STAGING_IPA" >/dev/null
+/usr/bin/ditto -x -k "$STAGING_IPA" "$EXTRACT_ROOT"
 
 payload_entries=()
 while IFS= read -r entry; do
@@ -225,6 +231,11 @@ if [[ ! -f "$EXTRACTED_APP/Assets.car" ]] ||
   exit 1
 fi
 
+python3 "$SCRIPT_DIR/audit-unsigned-app.py" "$EXTRACTED_APP" > "$BUILD_ROOT/embedded-executable-audit.txt"
+
+# Replace the deliverable only after the archive and all embedded binaries pass.
+mv -f -- "$STAGING_IPA" "$IPA_PATH"
+
 IPA_SHA256="$(shasum -a 256 "$IPA_PATH" | awk '{print $1}')"
 IPA_SIZE="$(stat -f '%z' "$IPA_PATH")"
 
@@ -245,6 +256,7 @@ IPA_SIZE="$(stat -f '%z' "$IPA_PATH")"
   echo "Entitlements: $ENTITLEMENTS_STATUS"
   echo "Provisioning-sensitive entitlements: $PROVISIONING_FLAGS"
   echo "Archive integrity: passed"
+  cat "$BUILD_ROOT/embedded-executable-audit.txt"
   echo "TrollStore document compatibility: .ipa with one Payload/BabyMonitor.app bundle"
   echo "Device launch: requires manual installation verification on both jailbroken target devices"
 } > "$REPORT_PATH"

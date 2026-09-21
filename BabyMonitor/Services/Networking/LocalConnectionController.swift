@@ -78,6 +78,18 @@ final class LocalConnectionController: ObservableObject {
         disconnect()
     }
 
+    func setWebRTCHandler(_ handler: @escaping @Sendable (WebRTCChannelEvent) -> Void) {
+        engine.setWebRTCHandler(handler)
+    }
+
+    nonisolated func sendWebRTC(_ signal: WebRTCSignal, channelID: UUID) {
+        engine.sendWebRTC(signal, channelID: channelID)
+    }
+
+    nonisolated func reconnectMedia(channelID: UUID) {
+        engine.reconnectMedia(channelID: channelID)
+    }
+
     nonisolated func sendVideo(_ frame: EncodedVideoFrame) {
         engine.sendVideo(frame)
     }
@@ -87,7 +99,7 @@ final class LocalConnectionController: ObservableObject {
     }
 
     func setVideoFrameHandler(
-        _ handler: (@Sendable (EncodedVideoFrame) -> Void)?
+        _ handler: VideoFrameConsumer?
     ) {
         engine.setVideoFrameHandler(handler)
     }
@@ -122,6 +134,7 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
     )
     private let outboundVideoCapacity = DispatchSemaphore(value: 2)
     private let outboundAudioCapacity = DispatchSemaphore(value: 4)
+    private let packetDelivery: WirePacketDelivery
 
     private var mode: LocalConnectionMode = .idle
     private var listener: NWListener?
@@ -139,13 +152,64 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
     private var pendingViewerPairing: ViewerPairing?
     private var pendingAuthentication: AuthenticationSession?
     private var authenticatedPeer: AuthenticatedPeer?
-    private var videoFrameHandler: (@Sendable (EncodedVideoFrame) -> Void)?
+    private var mediaChannelID: UUID?
+    private var signalingCipher = WebRTCSignalingCipher()
+    private var webRTCHandler: (@Sendable (WebRTCChannelEvent) -> Void)?
+    private var pendingSignals = 0
+    private var videoFrameHandler: VideoFrameConsumer?
     private var audioFrameHandler: (@Sendable (AudioWireFrame) -> Void)?
     private var diagnostics = LocalConnectionDiagnostics()
 
     init(identity: DeviceIdentity, pairingStore: PairingSecretStoring) {
         self.identity = identity
         self.pairingStore = pairingStore
+        packetDelivery = WirePacketDelivery(queue: queue)
+    }
+
+    func setWebRTCHandler(_ handler: @escaping @Sendable (WebRTCChannelEvent) -> Void) {
+        queue.async { [weak self] in self?.webRTCHandler = handler }
+    }
+
+    func sendWebRTC(_ signal: WebRTCSignal, channelID: UUID) {
+        queue.async { [weak self] in
+            guard let self, self.mediaChannelID == channelID,
+                  let peer = self.authenticatedPeer,
+                  let connection = self.activeConnection else { return }
+            do {
+                guard self.pendingSignals < 128 else {
+                    throw WebRTCSignalingError.invalidMessage
+                }
+                let payload = try self.signalingCipher.seal(
+                    signal, sender: self.mode == .monitor ? .monitor : .viewer,
+                    key: peer.mediaKey
+                )
+                self.pendingSignals += 1
+                connection.send(
+                    content: try WirePacketCodec.encode(WirePacket(type: .webRTC, payload: payload)),
+                    completion: .contentProcessed { [weak self, weak connection] error in
+                        self?.queue.async {
+                            guard let self, let connection,
+                                  self.activeConnection === connection,
+                                  self.mediaChannelID == channelID else { return }
+                            self.pendingSignals -= 1
+                            if let error { self.handleConnectionLoss(connection, error: error) }
+                        }
+                    }
+                )
+            } catch {
+                self.failProtocol(error)
+            }
+        }
+    }
+
+    func reconnectMedia(channelID: UUID) {
+        queue.async { [weak self] in
+            guard let self, self.mediaChannelID == channelID,
+                  let connection = self.activeConnection else { return }
+            // Viewer retries the saved, authenticated Bonjour endpoint; Monitor
+            // returns to advertising. Late callbacks cannot close a newer peer.
+            self.handleConnectionLoss(connection, error: nil)
+        }
     }
 
     func startMonitor(pairingCode: String) {
@@ -308,7 +372,7 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
     }
 
     func setVideoFrameHandler(
-        _ handler: (@Sendable (EncodedVideoFrame) -> Void)?
+        _ handler: VideoFrameConsumer?
     ) {
         queue.async { [weak self] in
             self?.videoFrameHandler = handler
@@ -451,6 +515,8 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
     }
 
     private func prepareConnection(_ connection: NWConnection) {
+        endMediaChannel()
+        packetDelivery.cancel()
         activeConnection?.cancel()
         activeConnection = connection
         framer = WirePacketFramer()
@@ -519,34 +585,49 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
             minimumIncompleteLength: 1,
             maximumLength: 64 * 1_024
         ) { [weak self, weak connection] content, _, isComplete, error in
-            guard let self, let connection else { return }
+            guard let self, let connection,
+                  self.activeConnection === connection else { return }
 
             do {
-                if let content, !content.isEmpty {
-                    let packets = try self.framer.append(content)
-                    for packet in packets {
-                        try self.handle(packet)
+                let packets = try self.framer.append(content ?? Data())
+                self.packetDelivery.deliver(
+                    packets,
+                    handle: { [weak self, weak connection] packet, consumed in
+                        guard let self, let connection,
+                              self.activeConnection === connection else {
+                            consumed()
+                            return
+                        }
+                        try self.handle(packet, consumed: consumed)
+                    },
+                    completion: { [weak self, weak connection] deliveryError in
+                        guard let self, let connection,
+                              self.activeConnection === connection else { return }
+                        if let deliveryError {
+                            self.failProtocol(deliveryError)
+                        } else if let error {
+                            self.handleConnectionLoss(connection, error: error)
+                        } else if isComplete {
+                            self.handleConnectionLoss(connection, error: nil)
+                        } else {
+                            self.receiveNext(on: connection)
+                        }
                     }
-                }
+                )
             } catch {
                 self.failProtocol(error)
-                return
-            }
-
-            if let error {
-                self.handleConnectionLoss(
-                    connection,
-                    error: error
-                )
-            } else if isComplete {
-                self.handleConnectionLoss(connection, error: nil)
-            } else {
-                self.receiveNext(on: connection)
             }
         }
     }
 
-    private func handle(_ packet: WirePacket) throws {
+    private func handle(
+        _ packet: WirePacket,
+        consumed: @escaping @Sendable () -> Void
+    ) throws {
+        var awaitingVideoConsumption = false
+        defer {
+            if !awaitingVideoConsumption { consumed() }
+        }
         guard packet.type == .control else {
             guard let authenticatedPeer else {
                 diagnostics.rejectedMediaPackets += 1
@@ -555,6 +636,16 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
             }
 
             switch packet.type {
+            case .webRTC:
+                guard let mediaChannelID else {
+                    throw LocalConnectionError.authenticationFailed
+                }
+                let signal = try signalingCipher.open(
+                    packet.payload,
+                    expectedSender: mode == .monitor ? .viewer : .monitor,
+                    key: authenticatedPeer.mediaKey
+                )
+                webRTCHandler?(.signal(channelID: mediaChannelID, signal))
             case .video:
                 guard mode == .viewer else { return }
                 do {
@@ -566,7 +657,10 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
                     let frame = try VideoWireCodec.decode(decrypted)
                     diagnostics.receivedVideoFrames += 1
                     emit(.diagnostics(diagnostics))
-                    videoFrameHandler?(frame)
+                    if let videoFrameHandler {
+                        awaitingVideoConsumption = true
+                        videoFrameHandler(frame, consumed)
+                    }
                 } catch {
                     diagnostics.rejectedMediaPackets += 1
                     emit(.diagnostics(diagnostics))
@@ -895,6 +989,13 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
         diagnostics.authenticatedPeerCount = 1
         emit(.diagnostics(diagnostics))
         emit(.state(.authenticated(peerName: session.peerName)))
+        let channelID = UUID()
+        mediaChannelID = channelID
+        signalingCipher = WebRTCSignalingCipher()
+        pendingSignals = 0
+        webRTCHandler?(.authenticated(
+            id: channelID, role: mode == .monitor ? .monitor : .viewer
+        ))
     }
 
     private func sendControl(_ message: ControlMessage) throws {
@@ -1020,6 +1121,8 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
     }
 
     private func clearPeerSession() {
+        endMediaChannel()
+        packetDelivery.cancel()
         framer = WirePacketFramer()
         pendingViewerHello = nil
         pendingMonitorPairing = nil
@@ -1030,6 +1133,13 @@ private nonisolated final class LocalConnectionEngine: @unchecked Sendable {
         diagnostics.outboundVideoDepth = 0
         diagnostics.outboundAudioDepth = 0
         emit(.diagnostics(diagnostics))
+    }
+
+    private func endMediaChannel() {
+        mediaChannelID = nil
+        signalingCipher = WebRTCSignalingCipher()
+        pendingSignals = 0
+        webRTCHandler?(.disconnected)
     }
 
     private func stopLocked(emitIdle: Bool) {

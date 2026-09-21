@@ -3,8 +3,7 @@ import SwiftUI
 struct ViewerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var connection: LocalConnectionController
-    @EnvironmentObject private var videoPlayback: H264VideoPlaybackController
-    @EnvironmentObject private var audioPlayback: RoomAudioPlaybackController
+    @EnvironmentObject private var media: WebRTCStreamController
     @EnvironmentObject private var roleStore: AppRoleStore
 
     @State private var pairingCode = ""
@@ -17,6 +16,9 @@ struct ViewerView: View {
                 if connection.state.isAuthenticated {
                     liveVideo
                     audioStatus
+                    if let warning = media.diagnostics.qualityWarning {
+                        Text(warning).font(.footnote).foregroundColor(.orange)
+                    }
                 }
 
                 if connection.state == .idle || connection.state.isFailure {
@@ -71,7 +73,7 @@ struct ViewerView: View {
 
                 DiagnosticsPanel(
                     role: .viewer,
-                    viewer: combinedViewerDiagnostics
+                    rtc: media.diagnostics
                 )
                     .frame(maxWidth: 600)
             }
@@ -87,19 +89,10 @@ struct ViewerView: View {
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .onChange(of: connection.state) { state in
             updateRoleLock()
-            if state.isAuthenticated {
-                videoPlayback.prepareForStream()
-                audioPlayback.prepareForStream()
-            } else {
-                videoPlayback.reset()
-                audioPlayback.reset()
-            }
         }
         .onChange(of: scenePhase) { phase in
             if phase == .background {
                 connection.disconnect()
-                videoPlayback.reset()
-                audioPlayback.reset()
             }
         }
     }
@@ -145,13 +138,13 @@ struct ViewerView: View {
         ZStack {
             Color.black
 
-            VideoPlaybackView(controller: videoPlayback)
+            WebRTCVideoView(track: media.remoteVideoTrack)
 
-            if videoPlayback.state != .playing {
+            if media.state != .live {
                 VStack(spacing: 10) {
                     ProgressView()
                         .tint(.white)
-                    Text(videoPlayback.state.title)
+                    Text(media.state.title)
                         .font(.headline)
                 }
                 .foregroundColor(.white)
@@ -167,9 +160,9 @@ struct ViewerView: View {
     }
 
     private var audioStatus: some View {
-        Label(audioPlayback.state.title, systemImage: "waveform")
+        Label(audioStatusTitle, systemImage: "waveform")
             .font(.subheadline)
-            .foregroundColor(audioPlaybackColor)
+            .foregroundColor(media.diagnostics.audioInterrupted ? .orange : .secondary)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground))
@@ -177,28 +170,13 @@ struct ViewerView: View {
             .accessibilityIdentifier("viewer-room-audio")
     }
 
-    private var combinedViewerDiagnostics: ViewerDiagnostics {
-        var diagnostics = videoPlayback.diagnostics
-        diagnostics.audioUnderrunCount =
-            audioPlayback.diagnostics.underrunCount
-        diagnostics.audioBufferDepth =
-            audioPlayback.diagnostics.bufferedPacketCount
-        diagnostics.droppedAudioPacketCount =
-            audioPlayback.diagnostics.droppedPacketCount
-        return diagnostics
-    }
-
-    private var audioPlaybackColor: Color {
-        switch audioPlayback.state {
-        case .playing:
-            return .green
-        case .interrupted:
-            return .orange
-        case .failed:
-            return .red
-        case .idle, .starting:
-            return .secondary
+    private var audioStatusTitle: String {
+        if media.diagnostics.audioInterrupted { return "Room audio interrupted" }
+        if media.diagnostics.audioPlaybackStatus.hasPrefix("Unavailable") {
+            return "Room audio output \(media.diagnostics.audioPlaybackStatus.lowercased())"
         }
+        if media.diagnostics.audioPackets > 0 { return "Receiving room audio" }
+        return "Waiting for room audio"
     }
 
     private var discoveredMonitors: some View {

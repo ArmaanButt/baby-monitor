@@ -1,5 +1,9 @@
 import Foundation
 
+typealias VideoFrameConsumer = @Sendable (
+    EncodedVideoFrame, @escaping @Sendable () -> Void
+) -> Void
+
 nonisolated enum StreamVideoProfile: String, CaseIterable, Codable, Identifiable, Sendable {
     case highQuality1080p
     case fallback720p

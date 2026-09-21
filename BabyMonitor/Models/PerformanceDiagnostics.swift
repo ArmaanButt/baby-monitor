@@ -69,6 +69,9 @@ nonisolated struct ViewerDiagnostics: Equatable {
     var averageDecodeRenderMilliseconds: Double?
     var videoBufferDepth: Int?
     var droppedFrameCount: Int?
+    var videoCapacityDropCount: Int?
+    var videoDecoderResetCount: Int?
+    var lastVideoRecoveryReason: String?
     var audioBufferDepth: Int?
     var droppedAudioPacketCount: Int?
     var audioUnderrunCount: Int?
@@ -132,6 +135,9 @@ nonisolated struct DiagnosticsReport: Equatable {
                 "Decode/render timing: \(Self.optionalMilliseconds(viewer.averageDecodeRenderMilliseconds))",
                 "Video buffer depth: \(Self.optionalBoundedCount(viewer.videoBufferDepth, limit: ViewerDiagnostics.videoBufferLimit, unit: "frames"))",
                 "Dropped viewer frames: \(Self.optionalCount(viewer.droppedFrameCount, unit: "frames"))",
+                "Video input overflows: \(Self.optionalCount(viewer.videoCapacityDropCount, unit: "frames"))",
+                "Video decoder failures: \(Self.optionalCount(viewer.videoDecoderResetCount, unit: "events"))",
+                "Last video recovery: \(viewer.lastVideoRecoveryReason ?? "None")",
                 "Audio buffer depth: \(Self.optionalBoundedCount(viewer.audioBufferDepth, limit: ViewerDiagnostics.audioBufferLimit, unit: "packets"))",
                 "Dropped audio packets: \(Self.optionalCount(viewer.droppedAudioPacketCount, unit: "packets"))",
                 "Audio underruns: \(Self.optionalCount(viewer.audioUnderrunCount, unit: "events"))"

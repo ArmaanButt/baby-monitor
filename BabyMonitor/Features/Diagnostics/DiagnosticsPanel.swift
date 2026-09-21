@@ -9,6 +9,7 @@ struct DiagnosticsPanel: View {
     var encoder = VideoEncoderDiagnostics()
     var audio = RoomAudioCaptureDiagnostics()
     var viewer = ViewerDiagnostics.unavailable
+    var rtc: WebRTCStreamDiagnostics?
 
     @State private var copiedReport = false
 
@@ -53,7 +54,7 @@ struct DiagnosticsPanel: View {
                 testContext
 
                 Button {
-                    UIPasteboard.general.string = report.text
+                    UIPasteboard.general.string = snapshotText
                     copiedReport = true
                 } label: {
                     Label(
@@ -92,6 +93,24 @@ struct DiagnosticsPanel: View {
 
     @ViewBuilder
     private var roleMetrics: some View {
+        if let rtc {
+            LazyVGrid(columns: columns, spacing: 10) {
+                tile("Delivered video", rtc.resolutionLabel)
+                tile("Video rate", String(format: "%.1f FPS", rtc.framesPerSecond))
+                tile("Video codec", rtc.codec)
+                tile("Frames", "\(rtc.frames)")
+                tile("Packets lost", "\(rtc.packetsLost)")
+                tile("Keyframe requests", "\(rtc.keyFrameRequests)")
+                tile("Retransmissions", "\(rtc.retransmissions)")
+                tile("Round trip", optionalMilliseconds(rtc.roundTripMilliseconds))
+                tile("Audio packets", "\(rtc.audioPackets)")
+                tile("Audio concealed", "\(rtc.audioConcealedSamples) samples")
+                if role == .monitor {
+                    tile("Capture rate", camera.framesPerSecondLabel)
+                    tile("Capture dropped", "\(camera.droppedFrameCount)")
+                }
+            }
+        } else {
         switch role {
         case .monitor:
             LazyVGrid(columns: columns, spacing: 10) {
@@ -142,6 +161,26 @@ struct DiagnosticsPanel: View {
                 }
             }
         }
+        }
+    }
+
+    private var snapshotText: String {
+        guard let rtc else { return report.text }
+        return [
+            "BabyMonitor WebRTC checkpoint",
+            "Role: \(role.rawValue)",
+            "Device: \(diagnostics.system.deviceIdentifier)",
+            "OS: \(diagnostics.system.operatingSystem)",
+            "Duration: \(diagnostics.system.elapsedLabel)",
+            "Memory: \(diagnostics.system.memory.currentLabel)",
+            "Peak memory: \(diagnostics.system.memory.peakLabel)",
+            "Memory change: \(diagnostics.system.memory.trendLabel)",
+            "Thermal: \(diagnostics.system.thermalState)",
+            "Power: \(diagnostics.system.powerState)",
+            "Jailbreak active: \(diagnostics.testContext.jailbreakActive)",
+            "Ambient: \(diagnostics.testContext.ambientConditions)",
+            rtc.text
+        ].joined(separator: "\n")
     }
 
     private var testContext: some View {

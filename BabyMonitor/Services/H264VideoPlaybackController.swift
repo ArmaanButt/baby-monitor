@@ -38,6 +38,8 @@ final class H264VideoPlaybackController: ObservableObject {
             averageDecodeRenderMilliseconds: nil,
             videoBufferDepth: 0,
             droppedFrameCount: 0,
+            videoCapacityDropCount: 0,
+            videoDecoderResetCount: 0,
             audioUnderrunCount: nil
         )
     }
@@ -59,8 +61,11 @@ final class H264VideoPlaybackController: ObservableObject {
         droppedFrameCount = 0
     }
 
-    nonisolated func enqueue(_ frame: EncodedVideoFrame) {
-        engine.enqueue(frame)
+    nonisolated func enqueue(
+        _ frame: EncodedVideoFrame,
+        completion: @escaping @Sendable () -> Void = {}
+    ) {
+        engine.enqueue(frame, completion: completion)
     }
 
     func attach(_ layer: AVSampleBufferDisplayLayer) {
@@ -104,9 +109,13 @@ final class H264VideoPlaybackController: ObservableObject {
                 state = .waitingForKeyFrame
             }
         case .dropped:
+            diagnostics.videoCapacityDropCount =
+                (diagnostics.videoCapacityDropCount ?? 0) + 1
+            diagnostics.lastVideoRecoveryReason = "Video input exceeded playback admission."
             recordDrop()
         case .failed(let message):
             state = .failed(message)
+            diagnostics.lastVideoRecoveryReason = message
             recordDrop()
         }
     }
@@ -115,6 +124,14 @@ final class H264VideoPlaybackController: ObservableObject {
         guard acceptsFrames else { return }
 
         if layer.status == .failed {
+            diagnostics.videoDecoderResetCount =
+                (diagnostics.videoDecoderResetCount ?? 0) + 1
+            if let error = layer.error as NSError? {
+                diagnostics.lastVideoRecoveryReason =
+                    "\(error.domain) (\(error.code)): \(error.localizedDescription)"
+            } else {
+                diagnostics.lastVideoRecoveryReason = "The video decoder rejected a sample."
+            }
             readinessRequest?.cancel()
             layer.stopRequestingMediaData()
             readinessRequest = nil
@@ -140,6 +157,8 @@ final class H264VideoPlaybackController: ObservableObject {
                 parameterSets: candidate.parameterSets
             ) {
             case .waitForKeyFrame:
+                diagnostics.lastVideoRecoveryReason =
+                    "Lost the H.264 reference chain before frame \(candidate.sequenceNumber)."
                 candidate.releaseCapacity()
                 recordDrop()
                 state = .waitingForKeyFrame
@@ -206,7 +225,7 @@ private nonisolated final class H264VideoPlaybackEngine: @unchecked Sendable {
         label: "com.armaanbutt.BabyMonitor.video.playback",
         qos: .userInteractive
     )
-    private let frameCapacity = DispatchSemaphore(value: 3)
+    private let frameCapacity = VideoFrameAdmission()
     private let playbackClock: MediaPlaybackClock
     private var formatDescription: CMVideoFormatDescription?
     private let generationLock = NSLock()
@@ -216,74 +235,98 @@ private nonisolated final class H264VideoPlaybackEngine: @unchecked Sendable {
         self.playbackClock = playbackClock
     }
 
-    func enqueue(_ frame: EncodedVideoFrame) {
-        guard frameCapacity.wait(timeout: .now()) == .success else {
-            eventHandler?(.dropped)
-            return
-        }
-
+    func enqueue(
+        _ frame: EncodedVideoFrame,
+        completion: @escaping @Sendable () -> Void
+    ) {
+        let capacity = frameCapacity
         let generation = currentGeneration()
-        queue.async { [weak self] in
-            guard let self else { return }
-            guard self.currentGeneration() == generation else {
-                self.frameCapacity.signal()
+        let accepted = capacity.reserve { [weak self] acquired in
+            guard acquired else {
+                completion()
                 return
             }
-            do {
-                if let parameterSets = frame.parameterSets {
-                    self.formatDescription = try Self.makeFormatDescription(
-                        parameterSets
-                    )
-                }
-
-                guard let formatDescription = self.formatDescription else {
-                    self.frameCapacity.signal()
-                    self.eventHandler?(.waitingForKeyFrame)
+            guard let self else {
+                capacity.release()
+                completion()
+                return
+            }
+            self.queue.async { [weak self] in
+                guard let self else {
+                    capacity.release()
                     return
                 }
+                guard self.currentGeneration() == generation else {
+                    self.frameCapacity.release()
+                    return
+                }
+                do {
+                    if let parameterSets = frame.parameterSets {
+                        self.formatDescription = try Self.makeFormatDescription(
+                            parameterSets
+                        )
+                    }
 
-                let sampleBuffer = try Self.makeSampleBuffer(
-                    frame: frame,
-                    formatDescription: formatDescription
-                )
-                let targetUptime = self.playbackClock.targetUptime(
-                    for: frame.presentationTimeMicroseconds
-                )
-                let delay = max(
-                    0,
-                    targetUptime - ProcessInfo.processInfo.systemUptime
-                )
-                let sendableSampleBuffer = SendablePlaybackSampleBuffer(
-                    sampleBuffer
-                )
-                self.queue.asyncAfter(
-                    deadline: .now() + delay
-                ) { [weak self] in
-                    guard let self else { return }
-                    guard self.currentGeneration() == generation else {
-                        self.frameCapacity.signal()
+                    guard let formatDescription = self.formatDescription else {
+                        self.frameCapacity.release()
+                        self.eventHandler?(.waitingForKeyFrame)
                         return
                     }
-                    self.eventHandler?(
-                        .frame(
-                            PlaybackFrameCandidate(
-                                sampleBuffer: sendableSampleBuffer.value,
-                                sequenceNumber: frame.sequenceNumber,
-                                isKeyFrame: frame.isKeyFrame,
-                                parameterSets: frame.parameterSets,
-                                isCurrent: { [weak self] in
-                                    self?.currentGeneration() == generation
-                                },
-                                startedAt: ProcessInfo.processInfo.systemUptime,
-                                capacity: self.frameCapacity
+
+                    let sampleBuffer = try Self.makeSampleBuffer(
+                        frame: frame,
+                        formatDescription: formatDescription
+                    )
+                    let targetUptime = self.playbackClock.targetUptime(
+                        for: frame.presentationTimeMicroseconds
+                    )
+                    let delay = max(
+                        0,
+                        targetUptime - ProcessInfo.processInfo.systemUptime
+                    )
+                    let sendableSampleBuffer = SendablePlaybackSampleBuffer(
+                        sampleBuffer
+                    )
+                    self.queue.asyncAfter(
+                        deadline: .now() + delay
+                    ) { [weak self] in
+                        guard let self else {
+                            capacity.release()
+                            return
+                        }
+                        guard self.currentGeneration() == generation else {
+                            self.frameCapacity.release()
+                            return
+                        }
+                        self.eventHandler?(
+                            .frame(
+                                PlaybackFrameCandidate(
+                                    sampleBuffer: sendableSampleBuffer.value,
+                                    sequenceNumber: frame.sequenceNumber,
+                                    isKeyFrame: frame.isKeyFrame,
+                                    parameterSets: frame.parameterSets,
+                                    isCurrent: { [weak self] in
+                                        self?.currentGeneration() == generation
+                                    },
+                                    startedAt: ProcessInfo.processInfo.systemUptime,
+                                    capacity: self.frameCapacity
+                                )
                             )
                         )
-                    )
+                    }
+                } catch {
+                    self.frameCapacity.release()
+                    self.eventHandler?(.failed(error.localizedDescription))
                 }
-            } catch {
-                self.frameCapacity.signal()
-                self.eventHandler?(.failed(error.localizedDescription))
             }
+            // Resume the packet reader once this frame owns a playback slot.
+            // Waiting for presentation here would also stall interleaved audio.
+            completion()
+        }
+        if !accepted {
+            // Defensive bound for a caller that ignores the admission callback.
+            eventHandler?(.dropped)
+            completion()
         }
     }
 
@@ -294,6 +337,7 @@ private nonisolated final class H264VideoPlaybackEngine: @unchecked Sendable {
                 self?.formatDescription = nil
             }
         }
+        frameCapacity.cancelPending()
     }
 
     private func currentGeneration() -> UInt64 {
@@ -461,7 +505,7 @@ private nonisolated final class PlaybackFrameCandidate: @unchecked Sendable {
     let isCurrent: @Sendable () -> Bool
     let startedAt: TimeInterval
 
-    private let capacity: DispatchSemaphore
+    private let capacity: VideoFrameAdmission
     private let lock = NSLock()
     private var didReleaseCapacity = false
 
@@ -472,7 +516,7 @@ private nonisolated final class PlaybackFrameCandidate: @unchecked Sendable {
         parameterSets: H264ParameterSets?,
         isCurrent: @escaping @Sendable () -> Bool,
         startedAt: TimeInterval,
-        capacity: DispatchSemaphore
+        capacity: VideoFrameAdmission
     ) {
         self.sampleBuffer = sampleBuffer
         self.sequenceNumber = sequenceNumber
@@ -485,10 +529,13 @@ private nonisolated final class PlaybackFrameCandidate: @unchecked Sendable {
 
     func releaseCapacity() {
         lock.lock()
-        defer { lock.unlock() }
-        guard !didReleaseCapacity else { return }
+        guard !didReleaseCapacity else {
+            lock.unlock()
+            return
+        }
         didReleaseCapacity = true
-        capacity.signal()
+        lock.unlock()
+        capacity.release()
     }
 
     deinit {

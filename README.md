@@ -6,7 +6,9 @@ A native, privacy-first baby monitor for Apple devices on the same trusted Wi-Fi
 - A **jailbroken iPad Air 2 running iPadOS 15.8.x** uses the Viewer role to discover or pair with the iPhone and play the live video and audio natively.
 - A **Mac running macOS 12 or later** uses the Mac Catalyst destination and opens in Viewer mode by default. Apple Silicon and Intel are build destinations.
 
-The release-candidate app contains the universal role shell, Monitor permission onboarding, a bounded 1080p/15 camera preview, a two-frame hardware H.264 encoder, an on-device performance diagnostics harness, Bonjour discovery, intentional six-digit pairing, Keychain-backed peer trust, and an authenticated local control connection. H.264 video uses compact binary framing, per-session authenticated encryption, and bounded native playback on the Viewer. One-way 24 kHz mono room audio uses the same encrypted session with bounded capture, network, and playback queues plus visible interruption and route state. Both playback paths use the same source timestamps and a bounded 150 ms playout clock. The Viewer automatically reconnects with capped backoff and re-authenticates saved pairings after transient local-network loss. The Monitor exposes the 720p/15 fallback explicitly instead of lowering quality silently. The **Baby Monitor MVP** project in Linear is the source of truth for current requirements, milestones, issue status, and acceptance criteria.
+The current media checkpoint uses **WebRTC 153.0.0** for direct-LAN H.264 video and one-way Opus room audio. Bonjour discovery, six-digit pairing, Keychain trust, and the authenticated control connection remain. WebRTC setup messages are encrypted over that connection; video/audio use DTLS-SRTP over local UDP. The default target remains **1080p / 15 FPS**, with 720p available only by explicit selection. No cloud signaling, STUN/TURN service, or analytics is configured. The Viewer uses an output-only audio device and does not request microphone/camera access.
+
+**Install the new IPA on both devices.** Setup protocol 2 is incompatible with the previous custom H.264/TCP build. See [WEBRTC_CHECKPOINT.md](WEBRTC_CHECKPOINT.md) for verified behavior, device tests, and delivery status. The **Baby Monitor MVP** project in Linear remains the source of truth for priorities and acceptance criteria.
 
 ## Product boundaries
 
@@ -28,7 +30,8 @@ The release-candidate app contains the universal role shell, Monitor permission 
 | Xcode template | iOS App |
 | Product name | `BabyMonitor` |
 | Interface | SwiftUI |
-| Language | Swift 5 |
+| Language | Swift 5 app integration; approved native WebRTC binary |
+| Media dependency | `stasel/WebRTC`, exact version `153.0.0` |
 | Storage | None |
 | Unit tests | Swift Testing |
 | UI tests | XCTest |
@@ -40,6 +43,8 @@ The release-candidate app contains the universal role shell, Monitor permission 
 Xcode can compile against its current SDK while producing an app whose minimum runtime is iOS/iPadOS 15. The deployment target does not downgrade the SDK; it makes newer APIs require availability checks and working fallbacks.
 
 ## Mac Viewer
+
+The WebRTC source supports the existing Catalyst target. This checkpoint does not renew Mac signing resources or deliver a new signed Mac package. The older Mac archive cannot connect to the protocol-2 iOS build.
 
 In Xcode, select the **BabyMonitor** scheme and **My Mac (Mac Catalyst)** destination. The Mac app opens in Viewer mode on first launch; a role selected later is remembered. The Viewer has a resizable window and uses the same discovery, six-digit pairing, encrypted video, and room audio as the iPad.
 
@@ -71,12 +76,13 @@ The script:
 
 - Builds the Release configuration with the physical `iphoneos` SDK and exactly the `arm64` architecture.
 - Sets `CODE_SIGNING_ALLOWED=NO` and `CODE_SIGNING_REQUIRED=NO`.
-- Verifies that `MinimumOSVersion` is no newer than iOS 16.7.16.
+- Requires app `MinimumOSVersion` 15.0 and audits the minimum OS/platform of every embedded executable.
 - Requires camera, microphone, and local-network usage descriptions in the built `Info.plist`.
 - Rejects an embedded Apple provisioning profile.
 - Audits a configured entitlements file and flags push notifications, iCloud, associated domains, and Sign in with Apple as provisioning-sensitive. If intended entitlements exist, a current `ldid` must be available so they can be preserved by fake-signing before packaging.
 - Packages exactly one top-level app bundle as `Payload/BabyMonitor.app`.
-- Extracts the finished IPA and revalidates its structure, archive integrity, permission metadata, and `arm64` executable.
+- Extracts the finished IPA and audits its structure, integrity, privacy metadata, and every `arm64` executable, including WebRTC.
+- Replaces the previous IPA only after all archive and executable checks succeed.
 - Writes `dist/BabyMonitor-validation.txt` with the checksum and results.
 
 To install, transfer the same `BabyMonitor.ipa` to each device using AirDrop or another file-transfer method. On the iPhone, select **Open in TrollStore Lite**. On the jailbroken iPad, select **Open in TrollStore**.
@@ -103,6 +109,8 @@ After local validation succeeds, the build replaces `BabyMonitor.ipa` in the Goo
 Do not begin the next checkpoint until the current IPA has been installed and its checklist has either passed or produced a recorded defect in Linear.
 
 The exact Build 7 physical-device acceptance steps are in [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md).
+
+The active media implementation and retest checklist are in [`WEBRTC_CHECKPOINT.md`](WEBRTC_CHECKPOINT.md). [`KEYFRAME_PLAYBACK_FIX.md`](KEYFRAME_PLAYBACK_FIX.md) records the preceding custom-transport checkpoint; that playback path is no longer wired into the app.
 
 ## Verify deployment settings
 
