@@ -1,5 +1,10 @@
 # Mac Viewer checkpoint
 
+This records the original Mac-support checkpoint. The active iOS media path is
+now described in [`WEBRTC_CHECKPOINT.md`](WEBRTC_CHECKPOINT.md). No new signed Mac
+archive was produced for that migration. The prior Mac archive uses protocol 1
+and cannot connect to the new protocol-2 iOS build.
+
 ## Current status
 
 Mac Catalyst support is implemented in the existing BabyMonitor app target.

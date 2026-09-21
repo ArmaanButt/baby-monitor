@@ -4,6 +4,7 @@ nonisolated enum WirePacketType: UInt8, Equatable, Sendable {
     case control = 1
     case video = 2
     case audio = 3
+    case webRTC = 4
 }
 
 nonisolated struct WirePacket: Equatable, Sendable {
@@ -72,6 +73,7 @@ nonisolated enum WireProtocolError: LocalizedError, Equatable {
     case invalidLength
     case unknownPacketType
     case invalidControlMessage
+    case unsupportedVersion
 
     var errorDescription: String? {
         switch self {
@@ -83,6 +85,8 @@ nonisolated enum WireProtocolError: LocalizedError, Equatable {
             return "A local-network packet had an unknown type."
         case .invalidControlMessage:
             return "A local-network control message was invalid."
+        case .unsupportedVersion:
+            return "Install the same WebRTC build of BabyMonitor on both devices."
         }
     }
 }
@@ -100,7 +104,7 @@ nonisolated struct ControlMessage: Codable, Equatable, Sendable {
         case stop
     }
 
-    static let currentProtocolVersion = 1
+    static let currentProtocolVersion = 2
 
     var kind: Kind
     var protocolVersion = currentProtocolVersion
@@ -126,7 +130,7 @@ nonisolated enum ControlMessageCodec {
     static func decode(_ payload: Data) throws -> ControlMessage {
         let message = try JSONDecoder().decode(ControlMessage.self, from: payload)
         guard message.protocolVersion == ControlMessage.currentProtocolVersion else {
-            throw WireProtocolError.invalidControlMessage
+            throw WireProtocolError.unsupportedVersion
         }
         return message
     }

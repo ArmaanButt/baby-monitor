@@ -6,8 +6,7 @@ struct MonitorView: View {
     @EnvironmentObject private var permissions: MediaPermissionController
     @EnvironmentObject private var roleStore: AppRoleStore
     @EnvironmentObject private var performanceDiagnostics: PerformanceDiagnosticsController
-    @EnvironmentObject private var videoEncoder: H264VideoEncoderController
-    @EnvironmentObject private var audioCapture: RoomAudioCaptureController
+    @EnvironmentObject private var media: WebRTCStreamController
     @EnvironmentObject private var connection: LocalConnectionController
 
     @State private var selectedProfile: StreamVideoProfile = .highQuality1080p
@@ -32,8 +31,7 @@ struct MonitorView: View {
                     DiagnosticsPanel(
                         role: .monitor,
                         camera: camera.diagnostics,
-                        encoder: videoEncoder.diagnostics,
-                        audio: audioCapture.diagnostics
+                        rtc: media.diagnostics
                     )
                 }
             }
@@ -52,18 +50,13 @@ struct MonitorView: View {
             case .active:
                 permissions.refresh()
                 if permissions.snapshot.allowsMonitoring {
-                    if camera.state == .suspended {
-                        videoEncoder.start(profile: camera.configuration.profile)
-                        audioCapture.start()
-                    }
                     camera.handleScenePhase(isActive: true)
                 } else if camera.state.isEngaged {
                     camera.stop()
                 }
             case .background:
                 camera.handleScenePhase(isActive: false)
-                videoEncoder.stop()
-                audioCapture.stop()
+                media.setMonitoring(profile: nil)
             case .inactive:
                 break
             @unknown default:
@@ -72,10 +65,7 @@ struct MonitorView: View {
         }
         .onChange(of: camera.state) { newState in
             updateRoleLock()
-            if newState == .idle || newState.isFailure {
-                videoEncoder.stop()
-                audioCapture.stop()
-            }
+            media.setMonitoring(profile: newState == .running ? camera.configuration.profile : nil)
         }
         .onChange(of: connection.state) { _ in
             updateRoleLock()
@@ -147,18 +137,13 @@ struct MonitorView: View {
                 .font(.footnote)
                 .foregroundColor(.secondary)
 
-            Label(
-                audioCapture.state.title,
-                systemImage: audioCaptureSymbol
-            )
-            .font(.footnote)
-            .foregroundColor(audioCaptureColor)
-
-            if case .failed(let message) = audioCapture.state {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundColor(.red)
+            Label(media.state.title, systemImage: "lock.shield")
+                .font(.footnote)
+                .foregroundColor(media.state == .live ? .green : .secondary)
+            if let warning = media.diagnostics.qualityWarning {
+                Text(warning).font(.footnote).foregroundColor(.orange)
             }
+
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,15 +172,12 @@ struct MonitorView: View {
             Button {
                 if camera.state.isEngaged {
                     camera.stop()
-                    videoEncoder.stop()
-                    audioCapture.stop()
+                    media.setMonitoring(profile: nil)
                 } else {
                     if connection.mode == .idle
                         || connection.state.isFailure {
                         connection.startMonitor()
                     }
-                    videoEncoder.start(profile: selectedProfile)
-                    audioCapture.start()
                     camera.start(profile: selectedProfile)
                 }
             } label: {
@@ -344,31 +326,4 @@ struct MonitorView: View {
         }
     }
 
-    private var audioCaptureSymbol: String {
-        switch audioCapture.state {
-        case .running:
-            return "waveform"
-        case .interrupted:
-            return "speaker.slash.fill"
-        case .failed:
-            return "exclamationmark.triangle.fill"
-        case .idle:
-            return "mic.slash"
-        case .starting:
-            return "clock.fill"
-        }
-    }
-
-    private var audioCaptureColor: Color {
-        switch audioCapture.state {
-        case .running:
-            return .green
-        case .interrupted:
-            return .orange
-        case .failed:
-            return .red
-        case .idle, .starting:
-            return .secondary
-        }
-    }
 }
